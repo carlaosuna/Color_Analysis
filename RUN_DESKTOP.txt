@@ -1,0 +1,11 @@
+@echo off
+REM Color Separation & Ink Analysis - Desktop Application Launcher
+REM To use this file:
+REM 1. Copy the contents of this file
+REM 2. Create a new text file
+REM 3. Paste the contents
+REM 4. Save as: RUN_DESKTOP.bat
+REM 5. Double-click to run
+
+python ColorAnalysisApp.py
+pause
