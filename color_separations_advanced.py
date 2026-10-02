@@ -39,7 +39,7 @@ st.markdown("""
 st.markdown("""
     <div class="header">
         <h1>🎨 Color Separation & Ink Analysis</h1>
-        <p>Adobe Separations Panel Equivalent - With Image Analysis</p>
+        <p>Adobe Separations Panel Equivalent - With Logo Detection</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -75,70 +75,90 @@ def extract_colors_from_content(content_bytes):
                 'b': b,
             })
     
-    except:
+    except Exception as e:
         pass
     
     return colors
 
 def detect_images_and_colors(pdf):
-    """Detect embedded images and estimate colors"""
+    """Detect embedded images and extract color information"""
     image_colors = []
     
     for page_num, page in enumerate(pdf.pages, 1):
-        if '/Resources' not in page:
-            continue
-        
-        resources = page['/Resources']
-        
-        if '/XObject' not in resources:
-            continue
-        
-        xobjects = resources['/XObject']
-        
-        if not isinstance(xobjects, dict):
-            continue
-        
-        for xobj_name, xobj in xobjects.items():
-            try:
-                # Check if it's an image
-                if '/Subtype' in xobj and xobj['/Subtype'] == '/Image':
+        try:
+            # Check for resources on this page
+            if '/Resources' not in page:
+                continue
+            
+            resources = page['/Resources']
+            
+            # Check for XObjects
+            if '/XObject' not in resources:
+                continue
+            
+            xobjects = resources['/XObject']
+            
+            # Iterate through XObjects
+            for xobj_name in list(xobjects.keys()):
+                try:
+                    xobj = xobjects[xobj_name]
+                    
+                    # Must be an image
+                    if '/Subtype' not in xobj:
+                        continue
+                    
+                    subtype_str = str(xobj['/Subtype'])
+                    if 'Image' not in subtype_str:
+                        continue
+                    
                     # Get dimensions
-                    width = float(xobj.get('/Width', 0))
-                    height = float(xobj.get('/Height', 0))
+                    width = 0
+                    height = 0
+                    if '/Width' in xobj:
+                        width = float(xobj['/Width'])
+                    if '/Height' in xobj:
+                        height = float(xobj['/Height'])
                     
                     # Get ColorSpace
-                    colorspace = None
+                    colorspace_str = ''
                     if '/ColorSpace' in xobj:
                         cs = xobj['/ColorSpace']
-                        colorspace = str(cs)
+                        colorspace_str = str(cs)
                     
-                    # Estimate coverage based on size
-                    # For logo-like objects, estimate 10-20% coverage
-                    estimated_coverage = 15.0
-                    
-                    # For CMYK images, estimate green as Dungarvin green
-                    if colorspace and 'DeviceCMYK' in colorspace:
+                    # Detect color type and add to list
+                    if 'DeviceCMYK' in colorspace_str:
+                        # CMYK image - likely logo with corporate color
                         image_colors.append({
-                            'name': 'Dungarvin Green (Spot)',
+                            'name': 'Logo / Embedded Image (Spot)',
                             'type': 'Spot',
-                            'coverage': estimated_coverage,
-                            'c': 75,
-                            'm': 10,
-                            'y': 100,
-                            'k': 0,
+                            'coverage': 15.0,  # Estimated based on typical logo size
+                            'colorspace': 'CMYK',
                             'page': page_num,
                             'dimensions': f'{int(width)}x{int(height)}'
                         })
-                    elif colorspace and 'DeviceRGB' in colorspace:
+                    
+                    elif 'DeviceRGB' in colorspace_str:
+                        # RGB image
                         image_colors.append({
-                            'name': f'Image Color (RGB)',
+                            'name': 'Image (RGB - Embedded)',
                             'type': 'Spot',
-                            'coverage': estimated_coverage,
+                            'coverage': 15.0,
+                            'colorspace': 'RGB',
                             'page': page_num,
                             'dimensions': f'{int(width)}x{int(height)}'
                         })
-            except:
-                pass
+                    
+                    elif 'DeviceGray' in colorspace_str:
+                        # Grayscale image
+                        pass  # Don't add grayscale as separate color
+                
+                except Exception as e:
+                    # Skip this object if there's an error
+                    continue
+        
+        except Exception as e:
+            # Skip this page if there's an error
+            continue
     
     return image_colors
 
@@ -162,7 +182,7 @@ if uploaded_file:
                         separations = []
                         has_cmyk = False
                         has_rgb = False
-                        total_coverage = 0
+                        total_coverage = 0.0
                         
                         # Extract colors from content streams
                         all_colors = []
@@ -178,7 +198,7 @@ if uploaded_file:
                                 except:
                                     pass
                         
-                        # Detect embedded images
+                        # Detect embedded images - THIS IS KEY
                         image_colors = detect_images_and_colors(pdf)
                         
                         # Check ColorSpace resources
@@ -265,22 +285,22 @@ if uploaded_file:
                                         c, m, y, k = key
                                         total_coverage = round((c + m + y + k) * 100, 1)
                         
-                        # Add image-detected colors
+                        # ADD IMAGE-DETECTED COLORS TO SEPARATIONS
                         for img_color in image_colors:
                             separations.append({
                                 'name': img_color['name'],
-                                'type': 'Spot',
+                                'type': img_color['type'],
                                 'coverage': img_color['coverage']
                             })
+                            # Add to total coverage
                             total_coverage += img_color['coverage']
                         
-                        # Remove duplicates
+                        # Remove duplicates by name
                         seen = set()
                         unique_separations = []
                         for sep in separations:
-                            key = (sep['name'], sep['type'])
-                            if key not in seen:
-                                seen.add(key)
+                            if sep['name'] not in seen:
+                                seen.add(sep['name'])
                                 unique_separations.append(sep)
                         separations = unique_separations
                         
@@ -340,7 +360,7 @@ if uploaded_file:
                             if has_cmyk:
                                 color_mode += "✓ CMYK (Process Colors)<br>"
                             if image_colors:
-                                color_mode += "✓ Embedded Images (Logo/Graphics)<br>"
+                                color_mode += "✓ Embedded Logos/Images<br>"
                             if has_rgb:
                                 color_mode += "✓ RGB (Screen Colors)<br>"
                             if not has_cmyk and not has_rgb and not image_colors:
@@ -377,6 +397,7 @@ if uploaded_file:
                             'total_coverage': total_coverage,
                             'has_process': has_cmyk,
                             'has_embedded_images': len(image_colors) > 0,
+                            'embedded_images_count': len(image_colors),
                         }
                         
                         st.download_button(
@@ -388,12 +409,14 @@ if uploaded_file:
             
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
 
 st.markdown("---")
 st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9em; margin-top: 40px;">
         <p><strong>Color Separation & Ink Analysis</strong></p>
         <p>Advanced PDF color analysis with embedded image detection</p>
-        <p style="font-size: 0.85em; color: #999;">Now detects embedded logos and images as spot colors</p>
+        <p style="font-size: 0.85em; color: #999;">Detects logos, images, and color separations</p>
     </div>
 """, unsafe_allow_html=True)
