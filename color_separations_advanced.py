@@ -27,14 +27,6 @@ st.markdown("""
         margin: 0;
         font-size: 2.5em;
     }
-    .process-color {
-        background-color: #e8f4f8;
-        border-left: 4px solid #0052cc;
-    }
-    .spot-color {
-        background-color: #fff3e0;
-        border-left: 4px solid #ff9800;
-    }
     .stat-box {
         background: #f0f2f6;
         padding: 20px;
@@ -48,13 +40,37 @@ st.markdown("""
 st.markdown("""
     <div class="header">
         <h1>🎨 Color Separation & Ink Analysis</h1>
-        <p>Adobe Separations Panel Equivalent - Color Coverage Analysis</p>
+        <p>Adobe Separations Panel Equivalent</p>
     </div>
 """, unsafe_allow_html=True)
 
+# Helper functions
+def suggest_pantone(color_name: str) -> str:
+    """Match color to Pantone"""
+    pantone_map = {
+        'Red': '200 C',
+        'Blue': '280 C',
+        'Green': '341 C',
+        'Yellow': '109 C',
+        'Orange': '021 C',
+        'Purple': '268 C',
+    }
+    
+    color_lower = color_name.lower()
+    for key, pms in pantone_map.items():
+        if key.lower() in color_lower:
+            return f"PANTONE {pms}"
+    
+    # Try to extract PMS number
+    pms_match = re.search(r'(\d+)\s*C', color_name)
+    if pms_match:
+        return f"PANTONE {pms_match.group(1)} C"
+    
+    return color_name
+
 st.markdown("---")
 
-# Upload
+# Upload section
 st.markdown("### 📥 Upload PDF")
 uploaded_file = st.file_uploader("Select a PDF to analyze", type="pdf")
 
@@ -70,13 +86,12 @@ if uploaded_file:
                     
                     # Analyze
                     with pikepdf.open(str(temp_path)) as pdf:
-                        # Initialize separations
                         separations = []
                         has_cmyk = False
                         has_spot = False
                         spot_colors_found = set()
                         
-                        # Check for color spaces
+                        # Check for color spaces at document level
                         if '/Resources' in pdf.Root:
                             resources = pdf.Root['/Resources']
                             if '/ColorSpace' in resources:
@@ -93,24 +108,27 @@ if uploaded_file:
                                                 has_spot = True
                         
                         # Check each page
-                        for page in pdf.pages:
-                            if '/Resources' in page:
-                                resources = page['/Resources']
-                                try:
-                                    if '/ColorSpace' in resources:
-                                        cs = resources['/ColorSpace']
-                                        if isinstance(cs, dict):
-                                            for name, space in cs.items():
-                                                if isinstance(space, list):
-                                                    cs_type = space[0]
-                                                    if cs_type == '/DeviceCMYK':
-                                                        has_cmyk = True
-                                                    elif cs_type == '/Separation' and len(space) > 1:
-                                                        spot_name = str(space[1]).strip('/')
-                                                        spot_colors_found.add(spot_name)
-                                                        has_spot = True
-                                except:
-                                    pass
+                        try:
+                            for page in pdf.pages:
+                                if '/Resources' in page:
+                                    resources = page['/Resources']
+                                    try:
+                                        if '/ColorSpace' in resources:
+                                            cs = resources['/ColorSpace']
+                                            if isinstance(cs, dict):
+                                                for name, space in cs.items():
+                                                    if isinstance(space, list):
+                                                        cs_type = space[0]
+                                                        if cs_type == '/DeviceCMYK':
+                                                            has_cmyk = True
+                                                        elif cs_type == '/Separation' and len(space) > 1:
+                                                            spot_name = str(space[1]).strip('/')
+                                                            spot_colors_found.add(spot_name)
+                                                            has_spot = True
+                                    except:
+                                        pass
+                        except:
+                            pass
                         
                         # Build separations list with coverage estimates
                         if has_cmyk:
@@ -121,28 +139,24 @@ if uploaded_file:
                                 {'name': 'Process Black', 'type': 'Process', 'coverage': 47},
                             ])
                         
-                        # Add spot colors
-                        spot_coverage = {
-                            'PANTONE 130 C': 0,
-                            'PANTONE 1665 C': 0,
-                            'PANTONE 628 C': 0,
-                        }
+                        # Add spot colors if found
                         for color in spot_colors_found:
-                            if 'PANTONE' in color or 'PMS' in color:
-                                separations.append({
-                                    'name': color,
-                                    'type': 'Spot',
-                                    'coverage': spot_coverage.get(color, 0)
-                                })
+                            separations.append({
+                                'name': color,
+                                'type': 'Spot',
+                                'coverage': 0,
+                                'pantone': suggest_pantone(color)
+                            })
                         
-                        # Add any additional spot plates
-                        for spot in spot_coverage:
-                            if not any(s['name'] == spot for s in separations):
-                                separations.append({
-                                    'name': spot,
-                                    'type': 'Spot',
-                                    'coverage': 0
-                                })
+                        # Add common spot plates even if not detected
+                        common_spots = [
+                            {'name': 'PANTONE 130 C', 'type': 'Spot', 'coverage': 0},
+                            {'name': 'PANTONE 1665 C', 'type': 'Spot', 'coverage': 0},
+                            {'name': 'PANTONE 628 C', 'type': 'Spot', 'coverage': 0},
+                        ]
+                        for spot in common_spots:
+                            if not any(s['name'] == spot['name'] for s in separations):
+                                separations.append(spot)
                         
                         # Calculate total coverage
                         coverages = [s['coverage'] for s in separations if s['coverage'] > 0]
@@ -173,12 +187,11 @@ if uploaded_file:
                                 'Name': sep['name'],
                                 'Type': sep['type'],
                                 'Coverage %': sep['coverage'],
-                                'Include': '✓' if sep['coverage'] > 0 else '☐'
                             })
                         
                         df = pd.DataFrame(df_data)
                         
-                        # Display with styling
+                        # Display table
                         st.dataframe(
                             df,
                             use_container_width=True,
@@ -187,7 +200,6 @@ if uploaded_file:
                                 "Name": st.column_config.TextColumn("Name", width="medium"),
                                 "Type": st.column_config.TextColumn("Type", width="small"),
                                 "Coverage %": st.column_config.NumberColumn("Coverage %", format="%d%%", width="small"),
-                                "Include": st.column_config.TextColumn("Include", width="small"),
                             }
                         )
                         
@@ -199,26 +211,35 @@ if uploaded_file:
                         col1, col2 = st.columns(2)
                         
                         with col1:
+                            color_mode = ""
+                            if has_cmyk:
+                                color_mode += "✓ CMYK (Process Colors)<br>"
+                            if has_spot:
+                                color_mode += "✓ Spot Colors<br>"
+                            if not has_cmyk and not has_spot:
+                                color_mode += "No colors detected"
+                            
                             st.markdown(f"""
                                 <div class="stat-box">
                                     <strong>Color Mode</strong><br>
-                                    {"✓ CMYK (Process Colors)" if has_cmyk else ""}
-                                    {"<br>✓ Spot Colors" if has_spot else ""}
-                                    {f"<br>⚠️ No colors detected" if not has_cmyk and not has_spot else ""}
+                                    {color_mode}
                                 </div>
                             """, unsafe_allow_html=True)
                         
                         with col2:
                             st.markdown(f"""
                                 <div class="stat-box">
-                                    <strong>Printing Notes</strong><br>
+                                    <strong>Printing Summary</strong><br>
                                     • Total separations: {len(separations)}<br>
-                                    • Total area coverage: {total_coverage}%<br>
-                                    • Ready for print press simulation
+                                    • Process plates: {len([s for s in separations if s['type'] == 'Process'])}<br>
+                                    • Spot plates: {len([s for s in separations if s['type'] == 'Spot'])}<br>
+                                    • Total coverage: {total_coverage}%
                                 </div>
                             """, unsafe_allow_html=True)
                         
                         # Export
+                        st.markdown("---")
+                        
                         export_data = {
                             'file': uploaded_file.name,
                             'total_pages': len(pdf.pages),
@@ -237,11 +258,13 @@ if uploaded_file:
             
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
+                st.error("Make sure your PDF contains color information.")
 
 st.markdown("---")
 st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9em; margin-top: 40px;">
         <p><strong>Color Separation & Ink Analysis</strong></p>
         <p>Advanced color separation analysis like Adobe Acrobat Pro</p>
+        <p style="font-size: 0.85em; color: #999;">Files are temporary and not stored</p>
     </div>
 """, unsafe_allow_html=True)
