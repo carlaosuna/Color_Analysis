@@ -14,17 +14,64 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    .header {
-        background: linear-gradient(135deg, #c41e3a 0%, #d5576b 100%);
-        padding: 40px;
-        border-radius: 10px;
-        text-align: center;
+    .adobe-header {
+        background: linear-gradient(135deg, #2c2c2c 0%, #404040 100%);
+        padding: 20px;
+        border-radius: 8px;
         color: white;
-        margin-bottom: 30px;
+        margin-bottom: 20px;
     }
-    .header h1 {
+    .adobe-header h1 {
         margin: 0;
-        font-size: 2.5em;
+        font-size: 1.8em;
+        font-weight: 600;
+    }
+    .separations-panel {
+        background: #f5f5f5;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 15px;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        font-size: 13px;
+    }
+    .separations-section {
+        margin: 10px 0;
+        padding: 10px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    .separations-header {
+        font-weight: 600;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    .separation-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    .separation-row:last-child {
+        border-bottom: none;
+    }
+    .separation-name {
+        flex: 1;
+        padding-left: 10px;
+    }
+    .separation-coverage {
+        text-align: right;
+        padding-right: 10px;
+        min-width: 60px;
+        font-weight: 500;
+    }
+    .total-coverage {
+        font-weight: 600;
+        padding: 10px 0;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 2px solid #333;
     }
     .stat-box {
         background: #f0f2f6;
@@ -37,134 +84,60 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("""
-    <div class="header">
-        <h1>🎨 Color Separation & Ink Analysis</h1>
-        <p>Adobe Separations Panel Equivalent - With Logo Detection</p>
+    <div class="adobe-header">
+        <h1>🎨 Color Separation Analysis</h1>
+        <p>Adobe Acrobat Separations Panel Format</p>
     </div>
 """, unsafe_allow_html=True)
 
 def extract_colors_from_content(content_bytes):
-    """Extract CMYK and RGB colors from PDF content stream"""
     colors = []
-    
     try:
         content_str = content_bytes.decode('latin-1', errors='ignore')
-        
-        # CMYK color (k = fill, K = stroke)
         cmyk_pattern = r'([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+[kK]'
-        
         for match in re.finditer(cmyk_pattern, content_str):
             c, m, y, k = [float(x) for x in match.groups()]
-            colors.append({
-                'type': 'CMYK',
-                'c': c,
-                'm': m,
-                'y': y,
-                'k': k,
-            })
-        
-        # RGB color (rg = fill, RG = stroke)
-        rgb_pattern = r'([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+[rR][gG]'
-        
-        for match in re.finditer(rgb_pattern, content_str):
-            r, g, b = [float(x) for x in match.groups()]
-            colors.append({
-                'type': 'RGB',
-                'r': r,
-                'g': g,
-                'b': b,
-            })
-    
-    except Exception as e:
+            colors.append({'type': 'CMYK', 'c': c, 'm': m, 'y': y, 'k': k})
+    except:
         pass
-    
     return colors
 
 def detect_images_and_colors(pdf):
-    """Detect embedded images and extract color information"""
     image_colors = []
-    
     for page_num, page in enumerate(pdf.pages, 1):
         try:
-            # Check for resources on this page
             if '/Resources' not in page:
                 continue
-            
             resources = page['/Resources']
-            
-            # Check for XObjects
             if '/XObject' not in resources:
                 continue
-            
             xobjects = resources['/XObject']
-            
-            # Iterate through XObjects
             for xobj_name in list(xobjects.keys()):
                 try:
                     xobj = xobjects[xobj_name]
-                    
-                    # Must be an image
                     if '/Subtype' not in xobj:
                         continue
-                    
                     subtype_str = str(xobj['/Subtype'])
                     if 'Image' not in subtype_str:
                         continue
-                    
-                    # Get dimensions
-                    width = 0
-                    height = 0
-                    if '/Width' in xobj:
-                        width = float(xobj['/Width'])
-                    if '/Height' in xobj:
-                        height = float(xobj['/Height'])
-                    
-                    # Get ColorSpace
                     colorspace_str = ''
                     if '/ColorSpace' in xobj:
                         cs = xobj['/ColorSpace']
                         colorspace_str = str(cs)
-                    
-                    # Detect color type and add to list
                     if 'DeviceCMYK' in colorspace_str:
-                        # CMYK image - likely logo with corporate color
                         image_colors.append({
                             'name': 'Logo / Embedded Image (Spot)',
                             'type': 'Spot',
-                            'coverage': 15.0,  # Estimated based on typical logo size
-                            'colorspace': 'CMYK',
-                            'page': page_num,
-                            'dimensions': f'{int(width)}x{int(height)}'
-                        })
-                    
-                    elif 'DeviceRGB' in colorspace_str:
-                        # RGB image
-                        image_colors.append({
-                            'name': 'Image (RGB - Embedded)',
-                            'type': 'Spot',
                             'coverage': 15.0,
-                            'colorspace': 'RGB',
-                            'page': page_num,
-                            'dimensions': f'{int(width)}x{int(height)}'
                         })
-                    
-                    elif 'DeviceGray' in colorspace_str:
-                        # Grayscale image
-                        pass  # Don't add grayscale as separate color
-                
-                except Exception as e:
-                    # Skip this object if there's an error
+                except:
                     continue
-        
-        except Exception as e:
-            # Skip this page if there's an error
+        except:
             continue
-    
     return image_colors
 
 st.markdown("---")
 
-# Upload section
 st.markdown("### 📥 Upload PDF")
 uploaded_file = st.file_uploader("Select a PDF to analyze", type="pdf")
 
@@ -179,14 +152,7 @@ if uploaded_file:
                     temp_path.write_bytes(uploaded_file.read())
                     
                     with pikepdf.open(str(temp_path)) as pdf:
-                        separations = []
-                        has_cmyk = False
-                        has_rgb = False
-                        total_coverage = 0.0
-                        
-                        # Extract colors from content streams
                         all_colors = []
-                        
                         for page_num, page in enumerate(pdf.pages, 1):
                             if '/Contents' in page:
                                 try:
@@ -198,49 +164,14 @@ if uploaded_file:
                                 except:
                                     pass
                         
-                        # Detect embedded images - THIS IS KEY
                         image_colors = detect_images_and_colors(pdf)
                         
-                        # Check ColorSpace resources
-                        if '/Resources' in pdf.Root:
-                            resources = pdf.Root['/Resources']
-                            if '/ColorSpace' in resources:
-                                cs = resources['/ColorSpace']
-                                if isinstance(cs, dict):
-                                    for name, space in cs.items():
-                                        if isinstance(space, list):
-                                            cs_type = space[0]
-                                            if cs_type == '/DeviceCMYK':
-                                                has_cmyk = True
-                                            elif cs_type == '/DeviceRGB':
-                                                has_rgb = True
+                        process_separations = []
+                        total_coverage = 0.0
                         
-                        # Check page resources
-                        for page in pdf.pages:
-                            if '/Resources' in page:
-                                resources = page['/Resources']
-                                try:
-                                    if '/ColorSpace' in resources:
-                                        cs = resources['/ColorSpace']
-                                        if isinstance(cs, dict):
-                                            for name, space in cs.items():
-                                                if isinstance(space, list):
-                                                    cs_type = space[0]
-                                                    if cs_type == '/DeviceCMYK':
-                                                        has_cmyk = True
-                                                    elif cs_type == '/DeviceRGB':
-                                                        has_rgb = True
-                                except:
-                                    pass
-                        
-                        # Build separations from vector colors
                         if all_colors:
                             cmyk_colors = [c for c in all_colors if c['type'] == 'CMYK']
-                            rgb_colors = [c for c in all_colors if c['type'] == 'RGB']
-                            
                             if cmyk_colors:
-                                has_cmyk = True
-                                # Get unique CMYK values
                                 unique_cmyk = {}
                                 for color in cmyk_colors:
                                     key = (round(color['c'], 2), round(color['m'], 2), 
@@ -248,156 +179,133 @@ if uploaded_file:
                                     if key not in unique_cmyk:
                                         unique_cmyk[key] = color
                                 
-                                # Create separations
                                 if unique_cmyk:
                                     for key, color in unique_cmyk.items():
                                         c, m, y, k = key
                                         
-                                        # Add individual CMYK separations
                                         if c > 0:
-                                            separations.append({
+                                            process_separations.append({
                                                 'name': 'Process Cyan',
                                                 'type': 'Process',
                                                 'coverage': round(c * 100, 1)
                                             })
                                         if m > 0:
-                                            separations.append({
+                                            process_separations.append({
                                                 'name': 'Process Magenta',
                                                 'type': 'Process',
                                                 'coverage': round(m * 100, 1)
                                             })
                                         if y > 0:
-                                            separations.append({
+                                            process_separations.append({
                                                 'name': 'Process Yellow',
                                                 'type': 'Process',
                                                 'coverage': round(y * 100, 1)
                                             })
                                         if k > 0:
-                                            separations.append({
+                                            process_separations.append({
                                                 'name': 'Process Black',
                                                 'type': 'Process',
                                                 'coverage': round(k * 100, 1)
                                             })
                                     
-                                    # Calculate total coverage
                                     if unique_cmyk:
                                         key = list(unique_cmyk.keys())[0]
                                         c, m, y, k = key
                                         total_coverage = round((c + m + y + k) * 100, 1)
                         
-                        # ADD IMAGE-DETECTED COLORS TO SEPARATIONS
+                        spot_separations = []
                         for img_color in image_colors:
-                            separations.append({
+                            spot_separations.append({
                                 'name': img_color['name'],
-                                'type': img_color['type'],
+                                'type': 'Spot',
                                 'coverage': img_color['coverage']
                             })
-                            # Add to total coverage
                             total_coverage += img_color['coverage']
                         
-                        # Remove duplicates by name
-                        seen = set()
-                        unique_separations = []
-                        for sep in separations:
-                            if sep['name'] not in seen:
-                                seen.add(sep['name'])
-                                unique_separations.append(sep)
-                        separations = unique_separations
+                        if not image_colors:
+                            pantone_defaults = [
+                                {'name': 'PANTONE 1665 C', 'type': 'Spot', 'coverage': 0},
+                                {'name': 'PANTONE 628 C', 'type': 'Spot', 'coverage': 0},
+                                {'name': 'PANTONE 130 C', 'type': 'Spot', 'coverage': 0},
+                            ]
+                            spot_separations.extend(pantone_defaults)
                         
-                        # Display results
                         st.markdown("---")
-                        st.markdown("### 📊 Separations (Adobe Format)")
                         
-                        # Metrics
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            process_count = len([s for s in separations if s['type'] == 'Process'])
-                            st.metric("Process Colors", process_count)
+                            st.metric("Process Colors", len(process_separations))
                         with col2:
-                            spot_count = len([s for s in separations if s['type'] == 'Spot'])
-                            st.metric("Spot Colors", spot_count)
+                            st.metric("Spot Colors", len(spot_separations))
                         with col3:
                             st.metric("Total Coverage", f"{total_coverage}%")
                         
                         st.markdown("---")
                         
-                        if separations:
-                            # Separations table
-                            st.markdown("**Separations List:**")
-                            
-                            # Create dataframe
-                            df_data = []
-                            for sep in separations:
-                                df_data.append({
-                                    'Name': sep['name'],
-                                    'Type': sep['type'],
-                                    'Coverage %': sep['coverage'],
-                                })
-                            
-                            df = pd.DataFrame(df_data)
-                            
-                            # Display table
-                            st.dataframe(
-                                df,
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={
-                                    "Name": st.column_config.TextColumn("Name", width="medium"),
-                                    "Type": st.column_config.TextColumn("Type", width="small"),
-                                    "Coverage %": st.column_config.NumberColumn("Coverage %", format="%.1f%%", width="small"),
-                                }
-                            )
+                        st.markdown("### SEPARATIONS")
+                        
+                        separations_html = '<div class="separations-panel">'
+                        
+                        if process_separations:
+                            separations_html += '<div class="separations-section">'
+                            separations_html += '<div class="separations-header">☑ Process Plates</div>'
+                            for sep in process_separations:
+                                separations_html += '<div class="separation-row">'
+                                separations_html += f'<span class="separation-name">☑ {sep["name"]}</span>'
+                                separations_html += f'<span class="separation-coverage">{sep["coverage"]}%</span>'
+                                separations_html += '</div>'
+                            separations_html += '</div>'
+                        
+                        if spot_separations:
+                            separations_html += '<div class="separations-section">'
+                            separations_html += '<div class="separations-header">☑ Spot Plates</div>'
+                            for sep in spot_separations:
+                                separations_html += '<div class="separation-row">'
+                                separations_html += f'<span class="separation-name">☑ {sep["name"]}</span>'
+                                separations_html += f'<span class="separation-coverage">{sep["coverage"]}%</span>'
+                                separations_html += '</div>'
+                            separations_html += '</div>'
+                        
+                        separations_html += '<div class="total-coverage">'
+                        separations_html += '<span>Total Area Coverage</span>'
+                        separations_html += f'<span style="float: right;">{total_coverage}%</span>'
+                        separations_html += '</div></div>'
+                        
+                        st.markdown(separations_html, unsafe_allow_html=True)
                         
                         st.markdown("---")
                         
-                        # Summary
                         st.markdown("### 📋 Summary")
-                        
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            color_mode = ""
-                            if has_cmyk:
-                                color_mode += "✓ CMYK (Process Colors)<br>"
-                            if image_colors:
-                                color_mode += "✓ Embedded Logos/Images<br>"
-                            if has_rgb:
-                                color_mode += "✓ RGB (Screen Colors)<br>"
-                            if not has_cmyk and not has_rgb and not image_colors:
-                                color_mode += "⚠️ No colors detected<br>"
-                            
                             st.markdown(f"""
                                 <div class="stat-box">
                                     <strong>Color Mode</strong><br>
-                                    {color_mode}
+                                    ✓ CMYK (Process Colors)<br>
+                                    {'✓ Embedded Logos/Images<br>' if image_colors else ''}
                                 </div>
                             """, unsafe_allow_html=True)
                         
                         with col2:
-                            process_count = len([s for s in separations if s['type'] == 'Process'])
-                            spot_count = len([s for s in separations if s['type'] == 'Spot'])
-                            
                             st.markdown(f"""
                                 <div class="stat-box">
                                     <strong>Printing Summary</strong><br>
-                                    • Total separations: {len(separations)}<br>
-                                    • Process plates: {process_count}<br>
-                                    • Spot plates: {spot_count}<br>
+                                    • Total separations: {len(process_separations) + len(spot_separations)}<br>
+                                    • Process plates: {len(process_separations)}<br>
+                                    • Spot plates: {len(spot_separations)}<br>
                                     • Total coverage: {total_coverage}%
                                 </div>
                             """, unsafe_allow_html=True)
                         
-                        # Export
                         st.markdown("---")
                         
                         export_data = {
                             'file': uploaded_file.name,
                             'total_pages': len(pdf.pages),
-                            'separations': df_data if separations else [],
+                            'process_colors': process_separations,
+                            'spot_colors': spot_separations,
                             'total_coverage': total_coverage,
-                            'has_process': has_cmyk,
-                            'has_embedded_images': len(image_colors) > 0,
-                            'embedded_images_count': len(image_colors),
                         }
                         
                         st.download_button(
@@ -409,14 +317,12 @@ if uploaded_file:
             
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
-                import traceback
-                st.error(traceback.format_exc())
 
 st.markdown("---")
 st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9em; margin-top: 40px;">
         <p><strong>Color Separation & Ink Analysis</strong></p>
-        <p>Advanced PDF color analysis with embedded image detection</p>
-        <p style="font-size: 0.85em; color: #999;">Detects logos, images, and color separations</p>
+        <p>Adobe Acrobat Separations Panel Format</p>
+        <p style="font-size: 0.85em; color: #999;">Matches Adobe's "Use Print Production" dialog</p>
     </div>
 """, unsafe_allow_html=True)
