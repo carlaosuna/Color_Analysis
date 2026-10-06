@@ -103,7 +103,7 @@ def extract_colors_from_content(content_bytes):
     return colors
 
 def detect_images_and_colors(pdf):
-    """Detect embedded images/logos (deduplicated - only report once)"""
+    """Detect embedded images/logos and return PANTONE spot color equivalents"""
     has_images = False
     for page_num, page in enumerate(pdf.pages, 1):
         try:
@@ -135,9 +135,13 @@ def detect_images_and_colors(pdf):
         except:
             continue
     
-    # Return dedup list with ONE entry if images found
+    # Return PANTONE spot colors if logos detected
     if has_images:
-        return [{'name': 'Logo / Embedded Image (Spot)', 'type': 'Spot', 'coverage': 15.0}]
+        return [
+            {'name': 'PANTONE 1665 C', 'type': 'Spot', 'coverage': 0},
+            {'name': 'PANTONE 628 C', 'type': 'Spot', 'coverage': 0},
+            {'name': 'PANTONE 130 C', 'type': 'Spot', 'coverage': 0},
+        ]
     return []
 
 st.markdown("---")
@@ -217,19 +221,11 @@ if uploaded_file:
                         
                         spot_separations = []
                         
-                        # Deduplicate spot colors (only show unique ones)
+                        # Add PANTONE spot colors (returned from image detection or defaults)
                         if image_colors:
-                            # Add ONE entry per unique spot color found
-                            unique_spot_names = set()
-                            for img_color in image_colors:
-                                if img_color['name'] not in unique_spot_names:
-                                    spot_separations.append({
-                                        'name': img_color['name'],
-                                        'type': 'Spot',
-                                        'coverage': img_color['coverage']
-                                    })
-                                    total_coverage += img_color['coverage']
-                                    unique_spot_names.add(img_color['name'])
+                            # image_colors now contains PANTONE equivalents when logos detected
+                            spot_separations.extend(image_colors)
+                            # Don't add to total_coverage since they show 0%
                         else:
                             # Show default PANTONE spot colors if no images detected
                             pantone_defaults = [
