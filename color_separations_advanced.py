@@ -103,7 +103,8 @@ def extract_colors_from_content(content_bytes):
     return colors
 
 def detect_images_and_colors(pdf):
-    image_colors = []
+    """Detect embedded images/logos (deduplicated - only report once)"""
+    has_images = False
     for page_num, page in enumerate(pdf.pages, 1):
         try:
             if '/Resources' not in page:
@@ -125,16 +126,19 @@ def detect_images_and_colors(pdf):
                         cs = xobj['/ColorSpace']
                         colorspace_str = str(cs)
                     if 'DeviceCMYK' in colorspace_str:
-                        image_colors.append({
-                            'name': 'Logo / Embedded Image (Spot)',
-                            'type': 'Spot',
-                            'coverage': 15.0,
-                        })
+                        has_images = True
+                        break
                 except:
                     continue
+            if has_images:
+                break
         except:
             continue
-    return image_colors
+    
+    # Return dedup list with ONE entry if images found
+    if has_images:
+        return [{'name': 'Logo / Embedded Image (Spot)', 'type': 'Spot', 'coverage': 15.0}]
+    return []
 
 st.markdown("---")
 
@@ -172,57 +176,62 @@ if uploaded_file:
                         if all_colors:
                             cmyk_colors = [c for c in all_colors if c['type'] == 'CMYK']
                             if cmyk_colors:
-                                unique_cmyk = {}
-                                for color in cmyk_colors:
-                                    key = (round(color['c'], 2), round(color['m'], 2), 
-                                           round(color['y'], 2), round(color['k'], 2))
-                                    if key not in unique_cmyk:
-                                        unique_cmyk[key] = color
+                                # Track MAX coverage for each separation across ALL colors
+                                separations_coverage = {
+                                    'Process Cyan': 0.0,
+                                    'Process Magenta': 0.0,
+                                    'Process Yellow': 0.0,
+                                    'Process Black': 0.0,
+                                }
                                 
-                                if unique_cmyk:
-                                    for key, color in unique_cmyk.items():
-                                        c, m, y, k = key
-                                        
-                                        if c > 0:
-                                            process_separations.append({
-                                                'name': 'Process Cyan',
-                                                'type': 'Process',
-                                                'coverage': round(c * 100, 1)
-                                            })
-                                        if m > 0:
-                                            process_separations.append({
-                                                'name': 'Process Magenta',
-                                                'type': 'Process',
-                                                'coverage': round(m * 100, 1)
-                                            })
-                                        if y > 0:
-                                            process_separations.append({
-                                                'name': 'Process Yellow',
-                                                'type': 'Process',
-                                                'coverage': round(y * 100, 1)
-                                            })
-                                        if k > 0:
-                                            process_separations.append({
-                                                'name': 'Process Black',
-                                                'type': 'Process',
-                                                'coverage': round(k * 100, 1)
-                                            })
-                                    
-                                    if unique_cmyk:
-                                        key = list(unique_cmyk.keys())[0]
-                                        c, m, y, k = key
-                                        total_coverage = round((c + m + y + k) * 100, 1)
+                                # Find the MAXIMUM coverage for each channel
+                                for color in cmyk_colors:
+                                    separations_coverage['Process Cyan'] = max(
+                                        separations_coverage['Process Cyan'], 
+                                        round(color['c'] * 100, 1)
+                                    )
+                                    separations_coverage['Process Magenta'] = max(
+                                        separations_coverage['Process Magenta'], 
+                                        round(color['m'] * 100, 1)
+                                    )
+                                    separations_coverage['Process Yellow'] = max(
+                                        separations_coverage['Process Yellow'], 
+                                        round(color['y'] * 100, 1)
+                                    )
+                                    separations_coverage['Process Black'] = max(
+                                        separations_coverage['Process Black'], 
+                                        round(color['k'] * 100, 1)
+                                    )
+                                
+                                # Add one entry per color with coverage > 0
+                                for color_name, coverage in separations_coverage.items():
+                                    if coverage > 0:
+                                        process_separations.append({
+                                            'name': color_name,
+                                            'type': 'Process',
+                                            'coverage': coverage
+                                        })
+                                
+                                # Total coverage = sum of max values (Adobe style)
+                                total_coverage = round(sum(separations_coverage.values()), 1)
                         
                         spot_separations = []
-                        for img_color in image_colors:
-                            spot_separations.append({
-                                'name': img_color['name'],
-                                'type': 'Spot',
-                                'coverage': img_color['coverage']
-                            })
-                            total_coverage += img_color['coverage']
                         
-                        if not image_colors:
+                        # Deduplicate spot colors (only show unique ones)
+                        if image_colors:
+                            # Add ONE entry per unique spot color found
+                            unique_spot_names = set()
+                            for img_color in image_colors:
+                                if img_color['name'] not in unique_spot_names:
+                                    spot_separations.append({
+                                        'name': img_color['name'],
+                                        'type': 'Spot',
+                                        'coverage': img_color['coverage']
+                                    })
+                                    total_coverage += img_color['coverage']
+                                    unique_spot_names.add(img_color['name'])
+                        else:
+                            # Show default PANTONE spot colors if no images detected
                             pantone_defaults = [
                                 {'name': 'PANTONE 1665 C', 'type': 'Spot', 'coverage': 0},
                                 {'name': 'PANTONE 628 C', 'type': 'Spot', 'coverage': 0},
